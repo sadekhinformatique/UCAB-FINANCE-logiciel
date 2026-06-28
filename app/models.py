@@ -19,6 +19,7 @@ class User(Base):
     phone = Column(String(50), nullable=True)
     role = Column(String(50), nullable=False, default="Membre")
     is_active = Column(Boolean, default=True)
+    neon_auth_id = Column(String(255), nullable=True, unique=True)
     login_attempts = Column(Integer, default=0)
     locked_until = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now)

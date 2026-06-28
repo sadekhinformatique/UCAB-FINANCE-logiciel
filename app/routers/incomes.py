@@ -1,3 +1,5 @@
+import json
+import asyncio
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session, joinedload
@@ -6,6 +8,7 @@ from app.database import get_db
 from app.models import Income, AuditLog, Category
 from app.auth import get_current_user
 from app.schemas import IncomeCreate, IncomeUpdate, IncomeResponse, ApiResponse
+from app.ws_manager import get_ws_manager
 
 router = APIRouter(prefix="/api/incomes", tags=["Entrées"])
 
@@ -155,6 +158,13 @@ def create_income(
     db.commit()
     db.refresh(income)
     _log_audit(db, current_user.id, "Création entrée", income.number, f"Entrée {income.number} de {income.amount} FCFA créée", req)
+    try:
+        ws_manager = get_ws_manager()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
     d = IncomeResponse.model_validate(income).model_dump()
     cat = db.query(Category).filter(Category.id == income.category_id).first()
     d["category_name"] = cat.name if cat else None
@@ -178,6 +188,13 @@ def update_income(
     db.commit()
     db.refresh(income)
     _log_audit(db, current_user.id, "Modification entrée", income.number, f"Entrée {income.number} modifiée", req)
+    try:
+        ws_manager = get_ws_manager()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
     d = IncomeResponse.model_validate(income).model_dump()
     cat = db.query(Category).filter(Category.id == income.category_id).first()
     d["category_name"] = cat.name if cat else None
@@ -198,4 +215,11 @@ def delete_income(
     db.delete(income)
     db.commit()
     _log_audit(db, current_user.id, "Suppression entrée", ref, f"Entrée {ref} supprimée", req)
+    try:
+        ws_manager = get_ws_manager()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
     return ApiResponse(message="Entrée supprimée avec succès")

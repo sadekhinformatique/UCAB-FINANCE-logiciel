@@ -1,9 +1,12 @@
+import json
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.models import User, UserPermission, AuditLog
 from app.auth import hash_password, get_current_user
 from app.schemas import UserCreate, UserUpdate, UserResponse, ApiResponse
+from app.ws_manager import get_ws_manager
 
 router = APIRouter(prefix="/api/users", tags=["Utilisateurs"])
 
@@ -68,6 +71,13 @@ def create_user(
     db.commit()
     db.refresh(user)
     _log_audit(db, current_user.id, "Création utilisateur", user.username, f"Utilisateur {user.username} créé avec rôle {user.role}", req)
+    try:
+        ws_manager = get_ws_manager()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
     return UserResponse.model_validate(user).model_dump()
 
 
@@ -93,6 +103,13 @@ def update_user(
     db.commit()
     db.refresh(user)
     _log_audit(db, current_user.id, "Modification utilisateur", user.username, f"Utilisateur {user.username} modifié", req)
+    try:
+        ws_manager = get_ws_manager()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
     return UserResponse.model_validate(user).model_dump()
 
 
@@ -112,4 +129,11 @@ def toggle_active(
     db.commit()
     status_text = "activé" if user.is_active else "désactivé"
     _log_audit(db, current_user.id, "Statut utilisateur", user.username, f"Utilisateur {user.username} {status_text}", req)
+    try:
+        ws_manager = get_ws_manager()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
     return ApiResponse(message=f"Utilisateur {status_text} avec succès")

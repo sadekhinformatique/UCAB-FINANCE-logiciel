@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
+    NEON_AUTH_URL: str = "https://ep-morning-art-ad42yeb6.neonauth.c-2.us-east-1.aws.neon.tech/neondb/auth"
+    NEON_AUTH_JWKS_URL: str = "https://ep-morning-art-ad42yeb6.neonauth.c-2.us-east-1.aws.neon.tech/neondb/auth/.well-known/jwks.json"
+
     CORS_ORIGINS: str = "*"
 
     class Config:

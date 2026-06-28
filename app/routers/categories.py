@@ -1,9 +1,12 @@
+import json
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Category, AuditLog
 from app.auth import get_current_user
 from app.schemas import CategoryCreate, CategoryUpdate, CategoryResponse, ApiResponse
+from app.ws_manager import get_ws_manager
 
 router = APIRouter(prefix="/api/categories", tags=["Catégories"])
 
@@ -54,6 +57,13 @@ def create_category(
     db.commit()
     db.refresh(cat)
     _log_audit(db, current_user.id, "Création catégorie", cat.name, f"Catégorie {cat.name} ({cat.type}) créée", req)
+    try:
+        ws_manager = get_ws_manager()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
     return CategoryResponse.model_validate(cat).model_dump()
 
 
@@ -73,6 +83,13 @@ def update_category(
     db.commit()
     db.refresh(cat)
     _log_audit(db, current_user.id, "Modification catégorie", cat.name, f"Catégorie {cat.name} modifiée", req)
+    try:
+        ws_manager = get_ws_manager()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
     return CategoryResponse.model_validate(cat).model_dump()
 
 
@@ -89,4 +106,11 @@ def delete_category(
     cat.is_active = False
     db.commit()
     _log_audit(db, current_user.id, "Suppression catégorie", cat.name, f"Catégorie {cat.name} désactivée", req)
+    try:
+        ws_manager = get_ws_manager()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
     return ApiResponse(message="Catégorie supprimée avec succès")

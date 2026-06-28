@@ -1,3 +1,5 @@
+import json
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -5,6 +7,7 @@ from app.database import get_db
 from app.models import Member, AuditLog
 from app.auth import get_current_user
 from app.schemas import MemberCreate, MemberUpdate, MemberResponse, ApiResponse
+from app.ws_manager import get_ws_manager
 
 router = APIRouter(prefix="/api/members", tags=["Membres"])
 
@@ -106,6 +109,13 @@ def create_member(
     db.commit()
     db.refresh(member)
     _log_audit(db, current_user.id, "Création membre", member.member_number, f"Membre {member.first_name} {member.last_name} créé", req)
+    try:
+        ws_manager = get_ws_manager()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
     return MemberResponse.model_validate(member).model_dump()
 
 
@@ -125,6 +135,13 @@ def update_member(
     db.commit()
     db.refresh(member)
     _log_audit(db, current_user.id, "Modification membre", member.member_number, f"Membre {member.first_name} {member.last_name} modifié", req)
+    try:
+        ws_manager = get_ws_manager()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
     return MemberResponse.model_validate(member).model_dump()
 
 
@@ -142,4 +159,11 @@ def delete_member(
     db.delete(member)
     db.commit()
     _log_audit(db, current_user.id, "Suppression membre", ref, f"Membre {ref} supprimé", req)
+    try:
+        ws_manager = get_ws_manager()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
     return ApiResponse(message="Membre supprimé avec succès")

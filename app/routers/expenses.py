@@ -1,3 +1,5 @@
+import json
+import asyncio
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session, joinedload
@@ -6,6 +8,7 @@ from app.database import get_db
 from app.models import Expense, AuditLog, Category
 from app.auth import get_current_user
 from app.schemas import ExpenseCreate, ExpenseUpdate, ExpenseResponse, ExpenseApprove, ExpenseReject, ApiResponse
+from app.ws_manager import get_ws_manager
 
 router = APIRouter(prefix="/api/expenses", tags=["Dépenses"])
 
@@ -176,6 +179,13 @@ def create_expense(
     db.commit()
     db.refresh(expense)
     _log_audit(db, current_user.id, "Création dépense", expense.number, f"Dépense {expense.number} de {expense.amount} FCFA créée", req)
+    try:
+        ws_manager = get_ws_manager()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
     d = ExpenseResponse.model_validate(expense).model_dump()
     cat = db.query(Category).filter(Category.id == expense.category_id).first()
     d["category_name"] = cat.name if cat else None
@@ -199,6 +209,13 @@ def update_expense(
     db.commit()
     db.refresh(expense)
     _log_audit(db, current_user.id, "Modification dépense", expense.number, f"Dépense {expense.number} modifiée", req)
+    try:
+        ws_manager = get_ws_manager()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
     d = ExpenseResponse.model_validate(expense).model_dump()
     cat = db.query(Category).filter(Category.id == expense.category_id).first()
     d["category_name"] = cat.name if cat else None
@@ -219,6 +236,13 @@ def delete_expense(
     db.delete(expense)
     db.commit()
     _log_audit(db, current_user.id, "Suppression dépense", ref, f"Dépense {ref} supprimée", req)
+    try:
+        ws_manager = get_ws_manager()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
     return ApiResponse(message="Dépense supprimée avec succès")
 
 
@@ -237,6 +261,13 @@ def approve_expense(
     expense.approved_by = data.approved_by
     db.commit()
     _log_audit(db, current_user.id, "Approbation dépense", expense.number, f"Dépense {expense.number} approuvée", req)
+    try:
+        ws_manager = get_ws_manager()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
     return ApiResponse(message="Dépense approuvée avec succès")
 
 
@@ -255,4 +286,11 @@ def reject_expense(
     expense.rejection_reason = data.rejection_reason
     db.commit()
     _log_audit(db, current_user.id, "Rejet dépense", expense.number, f"Dépense {expense.number} rejetée: {data.rejection_reason}", req)
+    try:
+        ws_manager = get_ws_manager()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
     return ApiResponse(message="Dépense rejetée")

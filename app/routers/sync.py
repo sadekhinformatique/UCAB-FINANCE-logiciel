@@ -1,11 +1,24 @@
-from fastapi import APIRouter, Depends, Request
+import json
+from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.models import Member, Income, Expense, Category, User, AppSettings
 from app.auth import get_current_user
 from app.schemas import SyncBatch, ApiResponse
+from app.ws_manager import get_ws_manager
 
 router = APIRouter(prefix="/api/sync", tags=["Synchronisation"])
+
+
+@router.websocket("/ws")
+async def sync_websocket(websocket: WebSocket):
+    ws_manager = get_ws_manager()
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
 
 
 @router.post("/push", response_model=ApiResponse)
@@ -80,6 +93,16 @@ def sync_push(
             results.append({"table": op.table, "action": op.action, "success": False, "error": str(e), "local_id": op.data.get("local_id")})
 
     db.commit()
+
+    try:
+        ws_manager = get_ws_manager()
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(ws_manager.broadcast(json.dumps({"type": "sync", "message": "data_changed"})))
+    except Exception:
+        pass
+
     return ApiResponse(message=f"{len(results)} opérations traitées", data={"results": results})
 
 

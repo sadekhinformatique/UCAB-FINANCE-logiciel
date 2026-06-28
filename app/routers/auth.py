@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -7,6 +8,7 @@ from app.auth import (
     verify_password, hash_password, create_access_token,
     create_refresh_token, get_current_user
 )
+from app.config import get_settings
 from app.schemas import (
     LoginRequest, Token, ChangePassword, ApiResponse
 )
@@ -16,6 +18,66 @@ router = APIRouter(prefix="/api/auth", tags=["Authentification"])
 
 @router.post("/login", response_model=Token)
 def login(request: LoginRequest, req: Request, db: Session = Depends(get_db)):
+    settings = get_settings()
+    try:
+        neon_resp = httpx.post(
+            f"{settings.NEON_AUTH_URL}/auth/sign-in/email",
+            json={"email": request.username, "password": request.password},
+            timeout=15,
+        )
+        if neon_resp.status_code == 200:
+            neon_data = neon_resp.json()
+            session_data = neon_data.get("session") or neon_data.get("data", {}).get("session", {})
+            access_token = neon_data.get("access_token") or session_data.get("access_token")
+            refresh_token = neon_data.get("refresh_token", "") or session_data.get("refresh_token", "")
+            neon_user = neon_data.get("user") or neon_data.get("data", {}).get("user", {})
+            email = neon_user.get("email", request.username)
+            neon_auth_id = neon_user.get("id", "")
+
+            user = db.query(User).filter(User.email == email).first()
+            if not user:
+                user = db.query(User).filter(User.username == request.username).first()
+            if user:
+                user.neon_auth_id = neon_auth_id
+                user.last_login = datetime.now()
+                user.login_attempts = 0
+                user.locked_until = None
+                db.commit()
+            else:
+                user = User(
+                    username=email.split("@")[0],
+                    password_hash=hash_password(request.password),
+                    first_name=neon_user.get("first_name", ""),
+                    last_name=neon_user.get("last_name", ""),
+                    email=email,
+                    neon_auth_id=neon_auth_id,
+                    role="Membre",
+                    last_login=datetime.now(),
+                )
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+
+            log = AuditLog(
+                action="Connexion",
+                user_id=user.id,
+                details=f"Connexion via Neon Auth de l'utilisateur {user.username}",
+                ip_address=req.client.host if req.client else None,
+            )
+            db.add(log)
+            db.commit()
+
+            return Token(
+                access_token=access_token,
+                refresh_token=refresh_token,
+                user_id=user.id,
+                role=user.role,
+            )
+    except httpx.RequestError:
+        pass
+    except Exception:
+        pass
+
     user = db.query(User).filter(User.username == request.username).first()
     if not user:
         raise HTTPException(
@@ -53,7 +115,12 @@ def login(request: LoginRequest, req: Request, db: Session = Depends(get_db)):
     db.add(log)
     db.commit()
 
-    return Token(access_token=access_token, refresh_token=refresh_token)
+    return Token(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user_id=user.id,
+        role=user.role,
+    )
 
 
 @router.post("/refresh", response_model=Token)
@@ -85,7 +152,7 @@ def refresh_token(request: LoginRequest, db: Session = Depends(get_db)):
         )
     access_token = create_access_token({"sub": str(user.id), "role": user.role})
     refresh_token = create_refresh_token({"sub": str(user.id)})
-    return Token(access_token=access_token, refresh_token=refresh_token)
+    return Token(access_token=access_token, refresh_token=refresh_token, user_id=user.id, role=user.role)
 
 
 @router.post("/change-password", response_model=ApiResponse)
